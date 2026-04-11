@@ -1,0 +1,16 @@
+# Runtime database files
+/data/postgres_data/*
+/data/redis_data/*
+
+# Keep folder placeholders
+!/data/postgres_data/.gitkeep
+!/data/redis_data/.gitkeep
+
+# Python artifacts
+__pycache__/
+*.pyc
+.venv/
+
+# Frontend artifacts
+frontend/node_modules/
+frontend/dist/
