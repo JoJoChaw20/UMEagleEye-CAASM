@@ -90,7 +90,7 @@ The script reads the Docker Compose credentials from `.env` by default and conne
 Install backend dependencies:
 
 ```bash
-pip install -r backend/requirements.txt
+python -m pip install -r backend/requirements.txt
 ```
 
 Start the API server from the repository root:
@@ -101,8 +101,51 @@ python -m uvicorn backend.main:app --reload
 
 Available endpoints:
 
-- `GET /health`
-- `GET /assets`
+- `GET /health` - Health check
+- `GET /assets` - List all discovered assets
+- `POST /scans/submit` - Submit a network scan
+- `GET /scans/{task_id}` - Get scan results
+
+### Network Scanner Worker
+
+The scanner worker uses Redis and nmap to automatically discover network devices.
+
+**Prerequisites:**
+- Install nmap (required for network scanning)
+  - **Windows:**
+    - Option 1 (requires admin): `choco install nmap` in elevated shell
+    - Option 2 (no admin needed): Download installer from https://nmap.org/download and run it
+    - Verify: `nmap --version` in a new terminal
+  - **macOS:** `brew install nmap`
+  - **Linux:** `sudo apt-get install nmap`
+
+**Start the scanner worker** (new terminal):
+
+```bash
+python -m backend.scanner_worker
+```
+
+The worker will listen on Redis for scan tasks and store discovered assets in PostgreSQL.
+
+**Submit a scan via CLI:**
+
+```bash
+python -m backend.scan_cli 10.0.0.0/24
+```
+
+**Submit a scan via API:**
+
+```bash
+curl -X POST http://localhost:8000/scans/submit \
+  -H "Content-Type: application/json" \
+  -d '{"network_range": "10.0.0.0/24"}'
+```
+
+**Get scan results:**
+
+```bash
+curl http://localhost:8000/scans/{task_id}
+```
 
 ### React frontend (Vite)
 
@@ -119,6 +162,48 @@ Run the Vite dev server:
 npm run dev
 ```
 
-By default, the UI calls `http://localhost:8000/assets` and renders the seeded assets in a Tailwind-styled table.
+The frontend includes:
+- **Executive Dashboard** with key metrics (total assets, critical assets, average criticality)
+- **Asset Trend Charts** showing discovery growth over 7 days
+- **Device Distribution Pie Chart** showing asset types
+- **Asset Inventory Table** with detailed asset information
+- **Real-time Updates** pulling latest data from the API
+
+Visit **http://localhost:5173** to view the dashboard.
 
 Optional: override API URL by setting `VITE_API_BASE_URL` before starting the frontend.
+
+## Telegram Bot Integration
+
+The Telegram bot sends notifications about infrastructure events.
+
+**Setup:**
+
+1. Create a Telegram bot with [@BotFather](https://t.me/botfather)
+2. Get your chat ID with [@userinfobot](https://t.me/userinfobot)
+3. Set environment variables:
+   ```bash
+   export TELEGRAM_BOT_TOKEN=your_bot_token_here
+   export TELEGRAM_CHAT_ID=your_chat_id_here
+   ```
+
+**Features:**
+- Notification when new assets are discovered
+- Alerts for critical assets (criticality ≥ 8)
+- Scan completion reports
+- Daily summary reports
+
+**Test the bot:**
+
+```bash
+python -m backend.telegram_bot
+```
+
+To integrate with the scanner, use:
+```python
+from backend.telegram_bot import get_telegram_bot
+
+bot = get_telegram_bot()
+if bot:
+    bot.notify_asset_discovered("DESKTOP-123", "192.168.1.100", "Workstation")
+```
