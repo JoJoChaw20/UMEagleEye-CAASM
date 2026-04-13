@@ -216,5 +216,8 @@ if __name__ == "__main__":
     else:
         bot = TelegramBot(bot_token, chat_id)
         # Test the bot
-        bot.send_message_sync("<b>Test Message</b>\nTelegram bot is working!")
-        print("Test message sent!")
+        sent = bot.send_message_sync("<b>Test Message</b>\nTelegram bot is working!")
+        if sent:
+            print("Test message sent!")
+        else:
+            print("Test message failed. Check TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID and network access.")

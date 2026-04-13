@@ -130,7 +130,18 @@ The worker will listen on Redis for scan tasks and store discovered assets in Po
 **Submit a scan via CLI:**
 
 ```bash
+# Auto-detect and scan your primary local network (easiest!)
+python -m backend.scan_cli --auto
+
+# Scan ALL local networks nearby (discover all devices!)
+python -m backend.scan_cli --auto-all
+
+# List available local networks to see all IP ranges
+python -m backend.scan_cli --list-networks
+
+# Scan a specific network range
 python -m backend.scan_cli 10.0.0.0/24
+python -m backend.scan_cli 192.168.1.0/24
 ```
 
 **Submit a scan via API:**

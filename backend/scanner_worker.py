@@ -48,26 +48,20 @@ class NetworkScanner:
         """
         logger.info(f"Starting network scan for {network_range}")
         try:
-            # Perform a ping scan to discover hosts
+            # Ping sweep to discover active hosts.
             self.nm.scan(hosts=network_range, arguments="-sn -T4")
             discovered = {}
 
             for host in self.nm.all_hosts():
                 try:
-                    # Check if host is actually in the scan results
-                    if host not in self.nm.all_hosts():
-                        continue
-                    
                     if self.nm[host].state() == "up":
                         logger.info(f"Host discovered: {host}")
                         device_info = self._get_device_info(host)
                         discovered[host] = device_info
                 except KeyError as e:
                     logger.warning(f"Host {host} not fully resolved yet, skipping: {e}")
-                    continue
                 except Exception as e:
                     logger.warning(f"Error processing host {host}: {e}")
-                    continue
 
             logger.info(f"Scan complete. Found {len(discovered)} hosts")
             return discovered
@@ -129,51 +123,63 @@ class NetworkScanner:
         hostname = device_info["hostname"]
         ip_address = device_info["ip_address"]
 
-        # Check if asset already exists
-        existing = (
-            self.db.query(Asset)
-            .filter_by(ip_address=ip_address)
-            .first()
-        )
-
-        if existing:
-            # Update existing asset
-            existing.hostname = hostname
-            existing.last_scanned = datetime.now(timezone.utc)
-            self.db.commit()
-            logger.info(f"Updated existing asset: {hostname} ({ip_address})")
-            return existing
-
-        # Create new asset
         open_ports = [p for p in device_info["ports"] if p["state"] == "open"]
-        device_type = self._infer_device_type(
-            hostname, open_ports, ip_address
-        )
+        device_type = self._infer_device_type(hostname, open_ports, ip_address)
         vendor = self._infer_vendor(hostname, ip_address)
+        os_info = self._infer_os(device_info["ports"])
+        now = datetime.now(timezone.utc)
 
-        asset = Asset(
-            asset_id=uuid4(),
-            hostname=hostname,
-            ip_address=ip_address,
-            mac_address="00:00:00:00:00:00",  # Placeholder - would need ARP for real MAC
-            owner="Network Auto-Discovery",
-            device_type=device_type,
-            hardware_vendor=vendor,
-            os_info=self._infer_os(device_info["ports"]),
-            last_boot_time=datetime.now(timezone.utc),
-            criticality_score=self._calculate_criticality(
-                device_type, open_ports
-            ),
-            baseline_state={
+        existing_by_ip = self.db.query(Asset).filter_by(ip_address=ip_address).first()
+        existing_by_hostname = self.db.query(Asset).filter_by(hostname=hostname).first()
+
+        # Upsert behavior:
+        # 1) same IP already exists -> update that row
+        # 2) hostname already exists (same device moved IP) -> update that row's IP
+        # 3) neither exists -> insert new row
+        target = existing_by_ip or existing_by_hostname
+
+        if target:
+            # Avoid assigning a hostname that is owned by another row.
+            if existing_by_hostname is None or existing_by_hostname.asset_id == target.asset_id:
+                target.hostname = hostname
+
+            target.ip_address = ip_address
+            target.owner = "Network Auto-Discovery"
+            target.device_type = device_type
+            target.hardware_vendor = vendor
+            target.os_info = os_info
+            target.last_boot_time = now
+            target.criticality_score = self._calculate_criticality(device_type, open_ports)
+            target.baseline_state = {
                 "open_ports": open_ports,
                 "discovery_method": "nmap",
-            },
-            last_scanned=datetime.now(timezone.utc),
-        )
+            }
+            target.last_scanned = now
+            self.db.commit()
+            logger.info(f"Updated asset: {target.hostname} ({target.ip_address})")
+            asset = target
+        else:
+            asset = Asset(
+                asset_id=uuid4(),
+                hostname=hostname,
+                ip_address=ip_address,
+                mac_address="00:00:00:00:00:00",  # Placeholder - would need ARP for real MAC
+                owner="Network Auto-Discovery",
+                device_type=device_type,
+                hardware_vendor=vendor,
+                os_info=os_info,
+                last_boot_time=now,
+                criticality_score=self._calculate_criticality(device_type, open_ports),
+                baseline_state={
+                    "open_ports": open_ports,
+                    "discovery_method": "nmap",
+                },
+                last_scanned=now,
+            )
 
-        self.db.add(asset)
-        self.db.commit()
-        logger.info(f"Created new asset: {hostname} ({ip_address})")
+            self.db.add(asset)
+            self.db.commit()
+            logger.info(f"Created new asset: {hostname} ({ip_address})")
 
         # Log discovery event
         event = Event(
@@ -241,7 +247,7 @@ class NetworkScanner:
             if key in hostname_lower:
                 return vendor
 
-        return "Unknown Vendor"
+        return "Unknown"
 
     @staticmethod
     def _infer_os(ports: list) -> str:
@@ -338,6 +344,8 @@ class ScanWorker:
                         }
                     )
                 except Exception as e:
+                    # Keep worker session usable after failures.
+                    self.scanner.db.rollback()
                     logger.warning(f"Failed to store asset for {ip}: {str(e)}")
                     failed_hosts.append({"ip": str(ip), "error": str(e)})
 
