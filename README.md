@@ -184,6 +184,48 @@ Visit **http://localhost:5173** to view the dashboard.
 
 Optional: override API URL by setting `VITE_API_BASE_URL` before starting the frontend.
 
+### Port Drift Detection
+
+Detect unauthorized port changes and security deviations across scans.
+
+**How it works:**
+- Compares current open ports against baseline from previous scans
+- Generates `PORT_DRIFT` events when new ports open or close
+- Creates `BASELINE_SNAPSHOT` events to track port state history
+- Can be run manually or scheduled via cron/Task Scheduler
+
+**Run drift detection:**
+
+```bash
+# Check assets scanned in the last 24 hours (default)
+python -m backend.drift_detector
+
+# Check assets scanned in the last 48 hours
+python -m backend.drift_detector --hours 48
+```
+
+**Output example:**
+```json
+{
+  "status": "completed",
+  "timestamp": "2026-04-13T10:50:00+00:00",
+  "assets_scanned": 5,
+  "total_drift_events": 2,
+  "assets_with_drift": [
+    {
+      "hostname": "DESKTOP-ABC",
+      "ip_address": "192.168.1.100",
+      "drifts": 1
+    }
+  ]
+}
+```
+
+**Drift Event Types:**
+- `NEW_PORTS`: One or more ports opened (severity: WARNING/CRITICAL)
+- `CLOSED_PORTS`: Ports closed (severity: INFO)
+- `BASELINE_SNAPSHOT`: Baseline capture for historical comparison
+
 ## Telegram Bot Integration
 
 The Telegram bot sends notifications about infrastructure events.
