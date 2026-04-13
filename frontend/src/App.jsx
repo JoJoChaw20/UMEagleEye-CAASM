@@ -53,41 +53,56 @@ function StatCard({ title, value, subtext, color = "slate" }) {
 
 function App() {
   const [assets, setAssets] = useState([]);
+  const [driftEvents, setDriftEvents] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState("");
 
-  useEffect(() => {
-    async function loadAssets() {
-      try {
+  async function loadDashboardData({ silent = false } = {}) {
+    try {
+      if (silent) {
+        setIsRefreshing(true);
+      } else {
         setLoading(true);
-        const response = await fetch(`${API_BASE}/assets`);
-        if (!response.ok) {
-          throw new Error(`Request failed with status ${response.status}`);
-        }
-        const data = await response.json();
-        setAssets(data);
-        setError("");
-      } catch (fetchError) {
-        setError(fetchError instanceof Error ? fetchError.message : "Failed to fetch assets");
-      } finally {
+      }
+
+      const [assetsResponse, driftResponse] = await Promise.all([
+        fetch(`${API_BASE}/assets`),
+        fetch(`${API_BASE}/drift-events`),
+      ]);
+
+      if (!assetsResponse.ok) {
+        throw new Error(`Asset request failed with status ${assetsResponse.status}`);
+      }
+
+      if (!driftResponse.ok) {
+        throw new Error(`Drift request failed with status ${driftResponse.status}`);
+      }
+
+      const [assetData, driftData] = await Promise.all([
+        assetsResponse.json(),
+        driftResponse.json(),
+      ]);
+
+      setAssets(assetData);
+      setDriftEvents(driftData);
+      setError("");
+    } catch (fetchError) {
+      setError(fetchError instanceof Error ? fetchError.message : "Failed to fetch assets");
+    } finally {
+      if (silent) {
+        setIsRefreshing(false);
+      } else {
         setLoading(false);
       }
     }
+  }
 
-    loadAssets();
+  useEffect(() => {
+    loadDashboardData();
 
     const intervalId = setInterval(async () => {
-      try {
-        const response = await fetch(`${API_BASE}/assets`);
-        if (!response.ok) {
-          throw new Error(`Request failed with status ${response.status}`);
-        }
-        const data = await response.json();
-        setAssets(data);
-        setError("");
-      } catch (fetchError) {
-        setError(fetchError instanceof Error ? fetchError.message : "Failed to fetch assets");
-      }
+      loadDashboardData({ silent: true });
     }, 10000);
 
     return () => clearInterval(intervalId);
@@ -102,6 +117,7 @@ function App() {
       : 0;
 
   const scannedIps = [...new Set(assets.map((asset) => asset.ip_address))];
+  const hasDriftEvents = driftEvents.length > 0;
 
   // Device type distribution
   const deviceTypeDistribution = assets.reduce((acc, asset) => {
@@ -119,12 +135,23 @@ function App() {
       <div className="mx-auto w-full max-w-7xl">
         {/* Header */}
         <header className="mb-8">
-          <h1 className="text-4xl font-bold tracking-tight text-slate-900">
-            UMEagleEye Executive Dashboard
-          </h1>
-          <p className="mt-2 text-lg text-slate-600">
-            Real-time asset discovery and infrastructure monitoring
-          </p>
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <h1 className="text-4xl font-bold tracking-tight text-slate-900">
+                UMEagleEye Executive Dashboard
+              </h1>
+              <p className="mt-2 text-lg text-slate-600">
+                Real-time asset discovery and infrastructure monitoring
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={loadDashboardData}
+              className="inline-flex items-center justify-center rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-700"
+            >
+              {isRefreshing ? "Refreshing..." : "Refresh now"}
+            </button>
+          </div>
         </header>
 
         {/* Error State */}
@@ -142,7 +169,7 @@ function App() {
         ) : (
           <>
             {/* Key Metrics */}
-            <div className="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-4">
+            <div className="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-5">
               <StatCard title="Total Assets" value={totalAssets} color="slate" />
               <StatCard
                 title="Critical Assets"
@@ -157,10 +184,16 @@ function App() {
                 color="blue"
               />
               <StatCard
+                title="Drift Events"
+                value={driftEvents.length}
+                subtext="Latest PORT_DRIFT results"
+                color="purple"
+              />
+              <StatCard
                 title="Last Updated"
                 value="Just now"
                 subtext={new Date().toLocaleTimeString()}
-                color="purple"
+                color="slate"
               />
             </div>
 
@@ -231,6 +264,91 @@ function App() {
                   <p className="py-8 text-center text-slate-500">No device data</p>
                 )}
               </div>
+            </div>
+
+            {/* Drift Detection Results */}
+            <div className="mb-8 rounded-lg bg-white p-6 shadow">
+              <div className="mb-4 flex items-center justify-between gap-4">
+                <h2 className="text-lg font-semibold text-slate-900">
+                  Recent Drift Detection Results
+                </h2>
+                <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700">
+                  {driftEvents.length} event{driftEvents.length === 1 ? "" : "s"}
+                </span>
+              </div>
+
+              {!hasDriftEvents ? (
+                <p className="text-sm text-slate-500">
+                  No drift events recorded yet. Run the scheduled job or execute drift detection manually to populate this section.
+                </p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead className="border-b border-slate-200 bg-slate-50">
+                      <tr>
+                        <th className="px-4 py-3 text-left font-semibold text-slate-700">Asset</th>
+                        <th className="px-4 py-3 text-left font-semibold text-slate-700">Type</th>
+                        <th className="px-4 py-3 text-left font-semibold text-slate-700">New Ports</th>
+                        <th className="px-4 py-3 text-left font-semibold text-slate-700">Closed Ports</th>
+                        <th className="px-4 py-3 text-left font-semibold text-slate-700">Remediation</th>
+                        <th className="px-4 py-3 text-center font-semibold text-slate-700">Severity</th>
+                        <th className="px-4 py-3 text-center font-semibold text-slate-700">Time</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-200">
+                      {driftEvents.map((event) => (
+                        <tr key={event.event_id} className="hover:bg-slate-50">
+                          <td className="px-4 py-3">
+                            <div className="font-medium text-slate-900">{event.hostname}</div>
+                            <div className="text-xs text-slate-500">{event.ip_address}</div>
+                          </td>
+                          <td className="px-4 py-3 text-slate-600">{event.drift_type}</td>
+                          <td className="px-4 py-3 text-slate-600">
+                            {event.new_ports.length > 0
+                              ? event.new_ports.map((port) => port.port).join(", ")
+                              : "-"}
+                          </td>
+                          <td className="px-4 py-3 text-slate-600">
+                            {event.closed_ports.length > 0
+                              ? event.closed_ports.map((port) => port.port ?? port).join(", ")
+                              : "-"}
+                          </td>
+                          <td className="max-w-xl px-4 py-3 text-slate-600">
+                            {event.remediation ? (
+                              <details>
+                                <summary className="cursor-pointer text-xs font-semibold text-slate-700">
+                                  View guidance
+                                </summary>
+                                <pre className="mt-2 whitespace-pre-wrap text-xs leading-relaxed text-slate-600">
+                                  {event.remediation}
+                                </pre>
+                              </details>
+                            ) : (
+                              <span className="text-xs text-slate-400">No guidance generated</span>
+                            )}
+                          </td>
+                          <td className="px-4 py-3 text-center">
+                            <span
+                              className={`inline-flex items-center justify-center rounded-full px-3 py-1 text-xs font-semibold text-white ${
+                                event.severity === "CRITICAL"
+                                  ? "bg-red-500"
+                                  : event.severity === "WARNING"
+                                    ? "bg-yellow-500"
+                                    : "bg-slate-500"
+                              }`}
+                            >
+                              {event.severity}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 text-center text-slate-600">
+                            {new Date(event.timestamp).toLocaleString()}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
             </div>
 
             {/* Asset Inventory Table */}

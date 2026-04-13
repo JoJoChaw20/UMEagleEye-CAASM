@@ -188,6 +188,59 @@ def seed_database() -> None:
         session.add_all(events)
         session.flush()
 
+        drift_events = [
+            Event(
+                asset_id=asset_map["web-01"].asset_id,
+                event_type="PORT_DRIFT",
+                severity="WARNING",
+                details={
+                    "drift_type": "NEW_PORTS",
+                    "new_ports": [
+                        {"port": 22, "state": "open", "protocol": "tcp", "service": "ssh"}
+                    ],
+                    "closed_ports": [],
+                    "previous_ports": [80, 443],
+                    "current_ports": [22, 80, 443],
+                    "detected_at": (now - timedelta(hours=1)).isoformat(),
+                },
+                timestamp=now - timedelta(hours=1),
+            ),
+            Event(
+                asset_id=asset_map["db-01"].asset_id,
+                event_type="PORT_DRIFT",
+                severity="CRITICAL",
+                details={
+                    "drift_type": "NEW_PORTS",
+                    "new_ports": [
+                        {"port": 3306, "state": "open", "protocol": "tcp", "service": "mysql"},
+                        {"port": 8443, "state": "open", "protocol": "tcp", "service": "https-alt"},
+                    ],
+                    "closed_ports": [],
+                    "previous_ports": [5432],
+                    "current_ports": [3306, 5432, 8443],
+                    "detected_at": (now - timedelta(minutes=45)).isoformat(),
+                },
+                timestamp=now - timedelta(minutes=45),
+            ),
+            Event(
+                asset_id=asset_map["ws-01"].asset_id,
+                event_type="PORT_DRIFT",
+                severity="INFO",
+                details={
+                    "drift_type": "CLOSED_PORTS",
+                    "new_ports": [],
+                    "closed_ports": [
+                        {"port": 445, "state": "closed", "protocol": "tcp", "service": "microsoft-ds"}
+                    ],
+                    "previous_ports": [135, 139, 445],
+                    "current_ports": [135, 139],
+                    "detected_at": (now - timedelta(minutes=20)).isoformat(),
+                },
+                timestamp=now - timedelta(minutes=20),
+            ),
+        ]
+        session.add_all(drift_events)
+
         advisory = Advisory(
             event_id=events[0].event_id,
             summary="An unexpected SSH service is exposed on the web server.",
@@ -215,7 +268,7 @@ def seed_database() -> None:
 
         session.commit()
 
-    print("Seed complete: 5 assets, 4 connections, 2 SBOMs, 6 events, 1 advisory, 2 posture metrics.")
+    print("Seed complete: 5 assets, 4 connections, 2 SBOMs, 9 events, 1 advisory, 2 posture metrics.")
 
 
 if __name__ == "__main__":

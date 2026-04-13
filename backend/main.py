@@ -8,7 +8,7 @@ from pydantic import BaseModel, field_validator
 from sqlalchemy.orm import Session
 
 from backend.database import SessionLocal
-from backend.models import Asset
+from backend.models import Asset, Event
 from backend.scanner_worker import ScanWorker
 
 
@@ -58,6 +58,27 @@ class DashboardStatsResponse(BaseModel):
     avg_criticality: float
     device_type_distribution: dict
     assets_by_owner: dict
+
+
+class DriftEventResponse(BaseModel):
+    event_id: UUID
+    asset_id: UUID
+    hostname: str
+    ip_address: str
+    event_type: str
+    severity: str
+    drift_type: str
+    new_ports: list
+    closed_ports: list
+    remediation: str | None = None
+    timestamp: datetime
+
+    model_config = {"from_attributes": True}
+
+    @field_validator("ip_address", mode="before")
+    @classmethod
+    def convert_ip_address(cls, value):
+        return str(value)
 
 
 def get_db() -> Session:
@@ -185,3 +206,37 @@ def get_dashboard_stats(db: Session = Depends(get_db)) -> dict:
         "device_type_distribution": device_distribution,
         "assets_by_owner": owner_distribution,
     }
+
+
+@app.get("/drift-events", response_model=list[DriftEventResponse])
+def get_drift_events(db: Session = Depends(get_db)) -> list[dict]:
+    """Get the latest port drift events for the dashboard."""
+    drift_events = (
+        db.query(Event, Asset)
+        .join(Asset, Event.asset_id == Asset.asset_id)
+        .filter(Event.event_type == "PORT_DRIFT")
+        .order_by(Event.timestamp.desc())
+        .limit(10)
+        .all()
+    )
+
+    response = []
+    for event, asset in drift_events:
+        details = event.details or {}
+        response.append(
+            {
+                "event_id": event.event_id,
+                "asset_id": asset.asset_id,
+                "hostname": asset.hostname,
+                "ip_address": str(asset.ip_address),
+                "event_type": event.event_type,
+                "severity": event.severity,
+                "drift_type": details.get("drift_type", "UNKNOWN"),
+                "new_ports": details.get("new_ports", []),
+                "closed_ports": details.get("closed_ports", []),
+                "remediation": details.get("remediation"),
+                "timestamp": event.timestamp,
+            }
+        )
+
+    return response
