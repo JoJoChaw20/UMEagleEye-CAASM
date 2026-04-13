@@ -154,6 +154,52 @@ Please check the worker logs and retry.
         """
         return self.send_message_sync(message.strip())
 
+    def notify_port_drift(
+        self,
+        hostname: str,
+        ip: str,
+        drift_type: str,
+        severity: str,
+        new_ports: list | None = None,
+        closed_ports: list | None = None,
+    ) -> bool:
+        """Send notification when port drift is detected."""
+        new_ports = new_ports or []
+        closed_ports = closed_ports or []
+
+        def format_ports(items: list) -> str:
+            if not items:
+                return "None"
+
+            formatted = []
+            for item in items:
+                if isinstance(item, dict):
+                    port = item.get("port", "?")
+                    state = item.get("state", "open")
+                    service = item.get("service")
+                    if service:
+                        formatted.append(f"{port}/{state} ({service})")
+                    else:
+                        formatted.append(f"{port}/{state}")
+                else:
+                    formatted.append(str(item))
+            return ", ".join(formatted)
+
+        message = f"""
+<b>⚠️ Port Drift Detected</b>
+
+<b>Hostname:</b> {hostname}
+<b>IP Address:</b> {ip}
+<b>Drift Type:</b> {drift_type}
+<b>Severity:</b> {severity}
+
+<b>New Ports:</b> {format_ports(new_ports)}
+<b>Closed Ports:</b> {format_ports(closed_ports)}
+
+Review the dashboard for the latest drift event details.
+        """
+        return self.send_message_sync(message.strip())
+
     def send_daily_summary(
         self, total_assets: int, critical_assets: int, new_assets: int
     ) -> bool:

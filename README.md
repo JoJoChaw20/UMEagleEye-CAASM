@@ -226,6 +226,46 @@ python -m backend.drift_detector --hours 48
 - `CLOSED_PORTS`: Ports closed (severity: INFO)
 - `BASELINE_SNAPSHOT`: Baseline capture for historical comparison
 
+**Schedule Daily Drift Detection (Windows):**
+
+To run drift detection automatically every day at 2:00 AM:
+
+```powershell
+$pythonExe = "c:\FYP\UMEagleEye-CAASM\.venv\Scripts\python.exe"
+$workDir = "c:\FYP\UMEagleEye-CAASM"
+$action = New-ScheduledTaskAction -Execute $pythonExe -Argument "-m backend.drift_detector --hours 24" -WorkingDirectory $workDir
+$trigger = New-ScheduledTaskTrigger -Daily -At 2am
+Register-ScheduledTask -TaskName "UMEagleEye-DriftDetection" -Action $action -Trigger $trigger -Description "Daily drift detection for UMEagleEye infrastructure" -Force
+```
+
+**Manage the scheduled task:**
+
+```powershell
+# View task details (status, next run time, etc.)
+Get-ScheduledTask -TaskName "UMEagleEye-DriftDetection"
+
+# Run it immediately (instead of waiting until 2 AM)
+Start-ScheduledTask -TaskName "UMEagleEye-DriftDetection"
+
+# Disable the task (pauses scheduled runs)
+Disable-ScheduledTask -TaskName "UMEagleEye-DriftDetection"
+
+# Delete the task
+Unregister-ScheduledTask -TaskName "UMEagleEye-DriftDetection" -Confirm:$false
+```
+
+**Schedule Daily Drift Detection (Linux/macOS):**
+
+Use cron to run at 2:00 AM daily:
+
+```bash
+# Edit crontab
+crontab -e
+
+# Add this line:
+0 2 * * * cd /path/to/UMEagleEye-CAASM && python -m backend.drift_detector --hours 24
+```
+
 ## Telegram Bot Integration
 
 The Telegram bot sends notifications about infrastructure events.

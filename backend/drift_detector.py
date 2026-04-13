@@ -14,6 +14,8 @@ from sqlalchemy.orm import Session
 
 from backend.database import SessionLocal, engine
 from backend.models import Asset, Base, Event
+from backend.remediation_agent import generate_remediation
+from backend.telegram_bot import get_telegram_bot
 
 # Configure logging
 logging.basicConfig(
@@ -21,6 +23,73 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger(__name__)
+
+
+def format_port_entries(port_entries: list) -> str:
+    """Format port entries for alerts."""
+    if not port_entries:
+        return "None"
+
+    formatted_ports = []
+    for entry in port_entries:
+        if isinstance(entry, dict):
+            port = entry.get("port", "?")
+            service = entry.get("service")
+            if service:
+                formatted_ports.append(f"{port} ({service})")
+            else:
+                formatted_ports.append(str(port))
+        else:
+            formatted_ports.append(str(entry))
+
+    return ", ".join(formatted_ports)
+
+
+def send_drift_notification(asset: Asset, drift_event: Event) -> None:
+    """Send a Telegram alert for a port drift event when configured."""
+    bot = get_telegram_bot()
+    if not bot:
+        return
+
+    details = drift_event.details or {}
+    bot.notify_port_drift(
+        hostname=asset.hostname,
+        ip=str(asset.ip_address),
+        drift_type=details.get("drift_type", drift_event.event_type),
+        severity=drift_event.severity,
+        new_ports=details.get("new_ports", []),
+        closed_ports=details.get("closed_ports", []),
+    )
+
+
+def create_drift_payload(asset: Asset, drift_event: Event) -> dict:
+    """Build a payload for Gemini remediation generation."""
+    details = drift_event.details or {}
+    return {
+        "event_type": drift_event.event_type,
+        "severity": drift_event.severity,
+        "hostname": asset.hostname,
+        "ip_address": str(asset.ip_address),
+        "drift_type": details.get("drift_type", drift_event.event_type),
+        "new_ports": details.get("new_ports", []),
+        "closed_ports": details.get("closed_ports", []),
+        "previous_ports": details.get("previous_ports", []),
+        "current_ports": details.get("current_ports", []),
+        "detected_at": details.get("detected_at"),
+        "asset": {
+            "owner": asset.owner,
+            "device_type": asset.device_type,
+            "hardware_vendor": asset.hardware_vendor,
+            "os_info": asset.os_info,
+            "criticality_score": asset.criticality_score,
+        },
+    }
+
+
+def attach_remediation(asset: Asset, drift_event: Event) -> str:
+    """Generate and return a Gemini remediation response for a drift event."""
+    payload = create_drift_payload(asset, drift_event)
+    return generate_remediation(payload)
 
 
 def get_open_ports(baseline_state: dict) -> set:
@@ -125,7 +194,15 @@ def detect_port_drift(asset: Asset, db: Session) -> list:
         )
         db.add(drift_event)
         db.commit()
+        remediation = attach_remediation(asset, drift_event)
+        drift_event.details = {
+            **(drift_event.details or {}),
+            "remediation": remediation,
+        }
+        db.add(drift_event)
+        db.commit()
         drift_events.append(drift_event)
+        send_drift_notification(asset, drift_event)
     
     if closed_ports:
         logger.info(
@@ -152,7 +229,15 @@ def detect_port_drift(asset: Asset, db: Session) -> list:
         )
         db.add(close_event)
         db.commit()
+        remediation = attach_remediation(asset, close_event)
+        close_event.details = {
+            **(close_event.details or {}),
+            "remediation": remediation,
+        }
+        db.add(close_event)
+        db.commit()
         drift_events.append(close_event)
+        send_drift_notification(asset, close_event)
     
     # Create a fresh baseline snapshot after drift detection
     if new_ports or closed_ports:
@@ -206,7 +291,7 @@ def run_drift_detection(hours_lookback: int = 24) -> dict:
                 assets_with_drift.append(
                     {
                         "hostname": asset.hostname,
-                        "ip_address": asset.ip_address,
+                        "ip_address": str(asset.ip_address),
                         "drifts": len(drifts),
                     }
                 )
