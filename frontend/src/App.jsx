@@ -66,6 +66,7 @@ function App() {
         }
         const data = await response.json();
         setAssets(data);
+        setError("");
       } catch (fetchError) {
         setError(fetchError instanceof Error ? fetchError.message : "Failed to fetch assets");
       } finally {
@@ -74,6 +75,22 @@ function App() {
     }
 
     loadAssets();
+
+    const intervalId = setInterval(async () => {
+      try {
+        const response = await fetch(`${API_BASE}/assets`);
+        if (!response.ok) {
+          throw new Error(`Request failed with status ${response.status}`);
+        }
+        const data = await response.json();
+        setAssets(data);
+        setError("");
+      } catch (fetchError) {
+        setError(fetchError instanceof Error ? fetchError.message : "Failed to fetch assets");
+      }
+    }, 10000);
+
+    return () => clearInterval(intervalId);
   }, []);
 
   // Calculate statistics
@@ -83,6 +100,8 @@ function App() {
     assets.length > 0
       ? (assets.reduce((sum, a) => sum + a.criticality_score, 0) / assets.length).toFixed(1)
       : 0;
+
+  const scannedIps = [...new Set(assets.map((asset) => asset.ip_address))];
 
   // Device type distribution
   const deviceTypeDistribution = assets.reduce((acc, asset) => {
@@ -216,6 +235,22 @@ function App() {
 
             {/* Asset Inventory Table */}
             <div className="rounded-lg bg-white p-6 shadow">
+              <h2 className="mb-4 text-lg font-semibold text-slate-900">Scanned IP Addresses</h2>
+              {scannedIps.length === 0 ? (
+                <p className="mb-6 text-sm text-slate-500">No scanned IP addresses yet.</p>
+              ) : (
+                <div className="mb-6 flex flex-wrap gap-2">
+                  {scannedIps.map((ip) => (
+                    <span
+                      key={ip}
+                      className="inline-flex items-center rounded-full bg-blue-100 px-3 py-1 text-xs font-semibold text-blue-800"
+                    >
+                      {ip}
+                    </span>
+                  ))}
+                </div>
+              )}
+
               <h2 className="mb-4 text-lg font-semibold text-slate-900">Asset Inventory</h2>
               {assets.length === 0 ? (
                 <p className="py-8 text-center text-slate-500">
